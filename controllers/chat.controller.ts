@@ -18,7 +18,7 @@ export const createChatController = (chatService: ChatService) => ({
     res.status(200).json(chat);
   },
   async renameChat(
-    req: Request<{ id: string }, any, { title?: string }>,
+    req: Request<{ id: string }, any, ChatBody>,
     res: Response,
   ) {
     const id = req.params.id;

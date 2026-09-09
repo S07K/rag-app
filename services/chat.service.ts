@@ -13,18 +13,15 @@ export const createChatService = (chatRepo: ChatRepository) => ({
         if (!chat) throw new AppError(404, "Chat not found")
         return chat
     },
-    async renameChat(id: string | undefined, title: string | undefined): Promise<Chat>  {
-        if (!id) throw new AppError(400, "id is required")
-        if (!title?.trim()) throw new AppError(400, "title is required")
-        let chat = await chatRepo.update(id, title?.trim())
+    async renameChat(id: string, title: string): Promise<Chat>  {
+        let chat = await chatRepo.update(id, title)
         if(!chat) {
             throw new AppError(404, "Chat not found")
         }
 
         return chat
     },
-    async deleteChat(id: string | undefined): Promise<void> {
-        if (!id) throw new AppError(400, "id is required")
+    async deleteChat(id: string): Promise<void> {
         let isDeleted = await chatRepo.delete(id)
         if(!isDeleted) {
             throw new AppError(404, "Chat not found")
