@@ -6,11 +6,13 @@ import { errorHandler } from './middleware/errorHandler'
 import { notFoundHandler } from './middleware/notFoundHandler'
 import { createChatRouter } from './routes/chat.routes'
 import { createChatService } from './services/chat.service'
-import { InMemoryChatRepository } from './repository/db/chat.repository'
+import { SQL } from 'bun'
+import { PostgresChatRepository } from './repository/db/chat.postgres.repository'
 
-const chatRepo = new InMemoryChatRepository()
+const sql = new SQL(Config.DATABASE_URL)
+const chatRepository = new PostgresChatRepository(sql)
 
-const chatService = createChatService(chatRepo)
+const chatService = createChatService(chatRepository)
 
 const app = express()
 const PORT = Config.PORT

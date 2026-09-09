@@ -4,7 +4,7 @@ const env = process.env
  * Required: no safe production default exists. Missing => refuse to start.
  * Add a var here and it is enforced automatically — no other change needed.
  */
-const REQUIRED = [] as const
+const REQUIRED = ['DATABASE_URL'] as const
 
 type RequiredKey = (typeof REQUIRED)[number]
 
