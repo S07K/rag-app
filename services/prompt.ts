@@ -2,12 +2,10 @@ import type { ChatMessage } from "../repository/clients/llm.client"
 import type { RetrievedChunk } from "../repository/vector/chunk.vector.repository"
 import type { Message } from "../repository/db/message.repository"
 
-/**
- * Cosine distance above which a chunk is treated as unrelated.
- * Measured on this corpus: on-topic chunks land ~0.30-0.70, off-topic ~0.90+.
- * Tune against real documents rather than trusting this number.
- */
-export const MAX_RELEVANT_DISTANCE = 0.8
+import { Config } from "../config"
+
+/** Cosine distance above which a chunk is treated as unrelated. Model-specific. */
+export const MAX_RELEVANT_DISTANCE = Config.RELEVANCE_MAX_DISTANCE
 
 /** Characters of retrieved context to include. Groq's free tier allows 6k tokens/min. */
 export const MAX_CONTEXT_CHARS = 4000

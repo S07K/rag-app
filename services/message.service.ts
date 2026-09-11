@@ -74,7 +74,7 @@ export const createMessageService = (
         // left watching nothing happen.
         yield { type: "status", value: "retrieving" }
 
-        const [queryVector] = await embeddingClient.embed([content])
+        const [queryVector] = await embeddingClient.embed([content], "query")
         if (!queryVector) throw new Error("Embedding client returned no vector")
 
         const retrieved = await vectorRepo.search(chatId, queryVector, RETRIEVAL_LIMIT)

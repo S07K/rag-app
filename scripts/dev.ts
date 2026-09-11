@@ -7,7 +7,7 @@
  */
 const processes = [
     { name: "api", cmd: ["bun", "--hot", "index.ts"] },
-    { name: "worker", cmd: ["bun", "worker.ts"] },
+    { name: "worker", cmd: ["bun", "worker.entry.ts"] },
 ]
 
 const children = processes.map(({ name, cmd }) => {

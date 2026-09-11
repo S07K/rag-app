@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     chat_id     uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     chunk_index int  NOT NULL,
     content     text NOT NULL,
-    embedding   vector(384) NOT NULL,
+    -- Must match EMBEDDING_PROVIDER's output; see migrations/001.
+    embedding   vector(768) NOT NULL,
     embedding_model text NOT NULL
 );
 

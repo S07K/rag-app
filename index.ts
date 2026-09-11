@@ -10,7 +10,8 @@ import { SQL } from 'bun'
 import { PostgresChatRepository } from './repository/db/chat.postgres.repository'
 import { createDocumentService } from './services/document.service'
 import { PostgresDocumentRepository } from './repository/db/document.repository'
-import { LocalEmbeddingClient } from './repository/clients/local.embedding.client'
+import { createEmbeddingClient, assertEmbeddingDimensions } from './repository/clients/embedding.factory'
+import { startWorker } from './worker'
 import { PostgresUserRepository, PostgresSessionRepository } from './repository/db/auth.repository'
 import { createAuthService } from './services/auth.service'
 import { createAuthRouter } from './routes/auth.routes'
@@ -27,7 +28,7 @@ const chatRepository = new PostgresChatRepository(sql)
 const documentRepository = new PostgresDocumentRepository(sql)
 const messageRepository = new PostgresMessageRepository(sql)
 const vectorRepository = new PostgresVectorRepository(sql)
-const embeddingClient = new LocalEmbeddingClient()
+const embeddingClient = await createEmbeddingClient()
 const llmClient = new GroqLLMClient(Config.LLM_MODEL, Config.GROQ_API_KEY!)
 
 const authService = createAuthService(userRepository, sessionRepository)
@@ -59,6 +60,13 @@ app.use("/chats", requireAuth(authService), createChatRouter(chatService, docume
 app.use(notFoundHandler)
 app.use(errorHandler)
 
+
+await assertEmbeddingDimensions(sql, embeddingClient)
+
+// Hosts that only offer a single service can run ingestion in this process.
+// With an API-backed embedding client the work is I/O-bound, so it does not
+// block request handling the way the local model would.
+if (process.env.RUN_WORKER_INLINE === "true") startWorker(sql)
 
 app.listen(PORT, () => {
     console.log("Server is listening on port", PORT)

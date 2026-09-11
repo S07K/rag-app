@@ -1,8 +1,7 @@
-import { SQL } from "bun"
-import { Config } from "./config"
+import type { SQL } from "bun"
 import { PostgresChatRepository } from "./repository/db/chat.postgres.repository"
 import { PostgresDocumentRepository } from "./repository/db/document.repository"
-import { LocalEmbeddingClient } from "./repository/clients/local.embedding.client"
+import { createEmbeddingClient } from "./repository/clients/embedding.factory"
 import { createDocumentService } from "./services/document.service"
 
 /** How long to sleep when the queue is empty. */
@@ -11,66 +10,64 @@ const IDLE_POLL_MS = 2000
 const STALE_AFTER_SECONDS = 300
 const MAX_ATTEMPTS = 3
 
-const sql = new SQL(Config.DATABASE_URL)
-const documentRepo = new PostgresDocumentRepository(sql)
-const documentService = createDocumentService(
-    new PostgresChatRepository(sql),
-    documentRepo,
-    new LocalEmbeddingClient(),
-)
-
-let running = true
-
-const shutdown = (signal: string) => {
-    // Finish the job in hand rather than abandoning it half-embedded.
-    console.log(`[worker] ${signal} received, finishing current job then exiting`)
-    running = false
-}
-
-process.on("SIGINT", () => shutdown("SIGINT"))
-process.on("SIGTERM", () => shutdown("SIGTERM"))
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function main() {
-    console.log(`[worker] started, polling every ${IDLE_POLL_MS}ms`)
+/**
+ * Drains the ingestion queue until stopped.
+ *
+ * Exported as a function so it can run either as its own process (worker.entry.ts)
+ * or inside the API process on hosts that only offer one service.
+ */
+export function startWorker(sql: SQL) {
+    const documentRepo = new PostgresDocumentRepository(sql)
 
-    const requeued = await documentRepo.requeueStale(STALE_AFTER_SECONDS, MAX_ATTEMPTS)
-    if (requeued > 0) console.log(`[worker] requeued ${requeued} stale job(s) from a previous run`)
+    let running = true
 
-    while (running) {
-        const job = await documentRepo.claimNextPending()
+    const loop = async () => {
+        const embeddingClient = await createEmbeddingClient()
+        const documentService = createDocumentService(
+            new PostgresChatRepository(sql),
+            documentRepo,
+            embeddingClient,
+        )
 
-        if (!job) {
-            await sleep(IDLE_POLL_MS)
-            continue
-        }
+        console.log(`[worker] started with ${embeddingClient.model}, polling every ${IDLE_POLL_MS}ms`)
 
-        const startedAt = Date.now()
-        console.log(`[worker] processing ${job.filename} (${job.id}, attempt ${job.attempts})`)
+        const requeued = await documentRepo.requeueStale(STALE_AFTER_SECONDS, MAX_ATTEMPTS)
+        if (requeued > 0) console.log(`[worker] requeued ${requeued} stale job(s)`)
 
-        try {
-            const chunks = await documentService.processDocument(job)
-            console.log(`[worker] ready: ${job.filename} — ${chunks} chunks in ${Date.now() - startedAt}ms`)
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err)
+        while (running) {
+            const job = await documentRepo.claimNextPending()
 
-            if (job.attempts >= MAX_ATTEMPTS) {
-                await documentRepo.markFailed(job.id, message)
-                console.error(`[worker] failed permanently: ${job.filename} — ${message}`)
-            } else {
-                // Back to 'pending' so a later pass retries it.
-                await documentRepo.updateStatus(job.id, "pending")
-                console.warn(`[worker] retrying ${job.filename} (attempt ${job.attempts}) — ${message}`)
+            if (!job) {
+                await sleep(IDLE_POLL_MS)
+                continue
+            }
+
+            const startedAt = Date.now()
+            console.log(`[worker] processing ${job.filename} (attempt ${job.attempts})`)
+
+            try {
+                const chunks = await documentService.processDocument(job)
+                console.log(`[worker] ready: ${job.filename} — ${chunks} chunks in ${Date.now() - startedAt}ms`)
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err)
+
+                if (job.attempts >= MAX_ATTEMPTS) {
+                    await documentRepo.markFailed(job.id, message)
+                    console.error(`[worker] failed permanently: ${job.filename} — ${message}`)
+                } else {
+                    await documentRepo.updateStatus(job.id, "pending")
+                    console.warn(`[worker] retrying ${job.filename} — ${message}`)
+                }
             }
         }
+
+        console.log("[worker] stopped")
     }
 
-    await sql.end()
-    console.log("[worker] stopped")
-}
+    const finished = loop()
 
-main().catch((err) => {
-    console.error("[worker] fatal:", err)
-    process.exit(1)
-})
+    /** Stops after the current job, so nothing is abandoned half-embedded. */
+    return { stop: () => { running = false }, finished }
+}

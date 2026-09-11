@@ -21,7 +21,7 @@ Built with **Express 5 + TypeScript on Bun**, in a strict layered architecture.
 | App database | Postgres 17, accessed via `Bun.SQL` |
 | Validation | [Zod](https://zod.dev) — parsed at the HTTP boundary |
 | Vector store | pgvector 0.8 with an HNSW index |
-| Embeddings | `all-MiniLM-L6-v2` locally via Transformers.js (384-dim), OpenAI-ready |
+| Embeddings | Gemini `gemini-embedding-001` (768-dim) or MiniLM locally (384-dim) |
 | LLM | Groq (`openai/gpt-oss-20b`), OpenAI-compatible API |
 | Uploads | multer, in-memory, `.txt` / `.md`, 256KB cap |
 | Frontend | React 19 + TypeScript, shadcn/ui design tokens, lucide icons |
@@ -386,6 +386,53 @@ data: {"messageId":"0a9e0513-6e3d-4bf3-8088-44b2848a940d"}
 
 ---
 
+## Deployment
+
+One container: Express serves both the API and the built frontend, and ingestion
+runs in-process when the host offers only a single service.
+
+| Piece | Where | Cost |
+|---|---|---|
+| Postgres + pgvector | [Neon](https://neon.com) free tier — permanent, scales to zero | free |
+| App | [Render](https://render.com) free web service, via `Dockerfile` | free |
+| Embeddings | Gemini API free tier (10M tokens/min) | free |
+| Chat model | Groq free tier | free |
+
+```bash
+# 1. Neon: create a project, copy its connection string
+psql "$NEON_URL" -f repository/db/schema.sql
+
+# 2. Push, then point Render at the repo (render.yaml is a blueprint)
+#    Set DATABASE_URL, GEMINI_API_KEY and GROQ_API_KEY in the dashboard.
+```
+
+`RUN_WORKER_INLINE=true` runs the ingestion loop inside the API process — Render's
+free plan has no background workers, and with an API-backed embedding client the
+work is I/O-bound rather than CPU-bound. On a paid plan, drop the flag and add a
+second service running `bun worker.entry.ts` against the same database.
+
+### Why embeddings moved off-process
+
+Running MiniLM in-process peaked at **459MB RSS** (and **2.7GB** before the
+embedding calls were batched — see below), which does not fit a 512MB instance.
+Switching to the Gemini API dropped peak memory to **37MB** and made retrieval
+measurably better, because Gemini embeds questions and passages asymmetrically:
+
+| query | Gemini | MiniLM |
+|---|---|---|
+| "How many database connections?" | **0.296** | 0.711 |
+| "What happens when a deploy fails?" | **0.276** | 0.454 |
+| "How do you brew espresso?" (irrelevant) | 0.469 | 0.903 |
+
+`@huggingface/transformers` is an `optionalDependency` loaded by dynamic import, so
+a Gemini deployment ships neither the 101MB package nor the 65MB of RSS importing
+it costs. The local provider remains available for offline development.
+
+Note the distance scales differ, so the relevance cutoff is per-provider
+(`RELEVANCE_MAX_DISTANCE`, defaulting to 0.4 for Gemini and 0.8 for MiniLM). A
+startup check refuses to boot if the client's dimensions don't match the
+`vector(N)` column, since vectors from different models are not comparable.
+
 ## Roadmap
 
 - [x] Project skeleton, layered wiring, `GET /health` end to end
@@ -407,5 +454,6 @@ data: {"messageId":"0a9e0513-6e3d-4bf3-8088-44b2848a940d"}
 - **Chunking splits on character count**, so chunks can begin mid-sentence and
   straddle topic boundaries. Recursive splitting on paragraph then sentence
   boundaries is the standard fix.
-- **The relevance cutoff (cosine distance `0.8`) is calibrated on sample data**, not
-  tuned against a real corpus.
+- **The relevance cutoff is calibrated on sample data**, not tuned against a real
+  corpus. It is at least per-provider now (`RELEVANCE_MAX_DISTANCE`) rather than one
+  number pretending to fit every embedding model.

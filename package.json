@@ -8,12 +8,11 @@
     "dev:api": "bun --hot index.ts",
     "start": "bun run build && bun index.ts",
     "serve": "bun index.ts",
-    "worker": "bun worker.ts",
+    "worker": "bun worker.entry.ts",
     "build": "rm -rf public && bun build ./frontend/index.html --outdir=public --minify --production",
     "build:dev": "rm -rf public && bun build ./frontend/index.html --outdir=public"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.2.0",
     "express": "^5.2.1",
     "lucide-react": "^1.45.0",
     "multer": "^2.3.0",
@@ -32,5 +31,8 @@
   },
   "peerDependencies": {
     "typescript": "^7"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^4.2.0"
   }
 }
