@@ -147,7 +147,9 @@ and the two sides cannot drift. This immediately caught a real bug: the controll
 emitted an `error` SSE frame that `StreamEvent` never declared.
 
 Chats can be renamed inline from the sidebar (pencil on hover; Enter or blur commits,
-Escape reverts) with an optimistic update that rolls back if the request fails.
+Escape reverts) and deleted behind an inline confirmation that names what else goes
+with them. Both are optimistic and roll back if the request fails; deleting the open
+chat falls back to the next one rather than leaving the pane pointing at nothing.
 
 State lives in four hooks that mirror the backend's boundaries — `useAuth`,
 `useChats`, `useDocuments` (which polls while ingestion is in flight), and

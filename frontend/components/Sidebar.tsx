@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { LogOut, MessageSquare, Pencil, Plus, Search } from "lucide-react"
+import { LogOut, MessageSquare, Pencil, Plus, Search, Trash2 } from "lucide-react"
 import type { Chat, User } from "../api"
 
 type Props = {
@@ -9,18 +9,21 @@ type Props = {
     onSelect: (id: string) => void
     onCreate: () => void
     onRename: (id: string, title: string) => void
+    onDelete: (id: string) => void
     onSignOut: () => void
 }
 
 function ChatRow({
-    chat, active, onSelect, onRename,
+    chat, active, onSelect, onRename, onDelete,
 }: {
     chat: Chat
     active: boolean
     onSelect: () => void
     onRename: (title: string) => void
+    onDelete: () => void
 }) {
     const [editing, setEditing] = useState(false)
+    const [confirming, setConfirming] = useState(false)
     const [value, setValue] = useState(chat.title)
     const input = useRef<HTMLInputElement>(null)
 
@@ -32,6 +35,18 @@ function ChatRow({
         setEditing(false)
         if (value.trim() && value.trim() !== chat.title) onRename(value)
         else setValue(chat.title)
+    }
+
+    // Deleting a chat also destroys its messages, documents and vectors, so it
+    // asks first — inline rather than a window.confirm, which can't explain that.
+    if (confirming) {
+        return (
+            <div className="chatItem confirming">
+                <span className="confirmText">Delete chat and its documents?</span>
+                <button className="confirmNo" onClick={() => setConfirming(false)}>Cancel</button>
+                <button className="confirmYes" onClick={onDelete}>Delete</button>
+            </div>
+        )
     }
 
     if (editing) {
@@ -68,6 +83,14 @@ function ChatRow({
             >
                 <Pencil size={13} />
             </button>
+            <button
+                className="iconBtn chatEdit danger"
+                title="Delete"
+                aria-label={`Delete ${chat.title}`}
+                onClick={(e) => { e.stopPropagation(); setConfirming(true) }}
+            >
+                <Trash2 size={13} />
+            </button>
         </div>
     )
 }
@@ -99,7 +122,9 @@ function groupByRecency(chats: Chat[]) {
         .map((label) => [label, groups[label]!] as const)
 }
 
-export function Sidebar({ user, chats, activeId, onSelect, onCreate, onRename, onSignOut }: Props) {
+export function Sidebar({
+    user, chats, activeId, onSelect, onCreate, onRename, onDelete, onSignOut,
+}: Props) {
     const [query, setQuery] = useState("")
 
     const groups = useMemo(() => {
@@ -135,6 +160,7 @@ export function Sidebar({ user, chats, activeId, onSelect, onCreate, onRename, o
                                 active={chat.id === activeId}
                                 onSelect={() => onSelect(chat.id)}
                                 onRename={(title) => onRename(chat.id, title)}
+                                onDelete={() => onDelete(chat.id)}
                             />
                         ))}
                     </div>

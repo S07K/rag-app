@@ -59,6 +59,8 @@ export const api = {
             body: JSON.stringify({ title }),
         }),
 
+    deleteChat: (chatId: string) => request<null>(`/chats/${chatId}`, { method: "DELETE" }),
+
     listDocuments: (chatId: string) => request<Document[]>(`/chats/${chatId}/uploads`),
 
     uploadDocument: (chatId: string, file: File) => {

@@ -60,5 +60,29 @@ export function useChats(enabled: boolean, onError: (err: unknown) => boolean) {
         [chats, onError],
     )
 
-    return { chats, activeId, setActiveId, create, refresh, rename, loading }
+    const remove = useCallback(
+        async (id: string) => {
+            const previous = chats
+
+            // Deleting cascades to messages, documents and chunks server-side.
+            setChats((prev) => prev.filter((c) => c.id !== id))
+
+            // If the open chat just went away, fall back to the next one so the
+            // main pane never points at something that no longer exists.
+            setActiveId((current) => {
+                if (current !== id) return current
+                return previous.find((c) => c.id !== id)?.id ?? null
+            })
+
+            try {
+                await api.deleteChat(id)
+            } catch (err) {
+                setChats(previous)
+                if (!onError(err)) throw err
+            }
+        },
+        [chats, onError],
+    )
+
+    return { chats, activeId, setActiveId, create, refresh, rename, remove, loading }
 }

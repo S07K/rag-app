@@ -12,7 +12,9 @@ import { useChat } from "./hooks/useChat"
 
 export function App() {
     const { user, ready, notice, authenticate, signOut, handleError } = useAuth()
-    const { chats, activeId, setActiveId, create, rename, loading: chatsLoading } = useChats(Boolean(user), handleError)
+    const {
+        chats, activeId, setActiveId, create, rename, remove: removeChat, loading: chatsLoading,
+    } = useChats(Boolean(user), handleError)
     const { documents, upload, remove, indexing, stalled } = useDocuments(activeId, handleError)
     const { messages, draft, streaming, loading: messagesLoading, send, stop } = useChat(activeId, handleError)
     const [input, setInput] = useState("")
@@ -54,6 +56,7 @@ export function App() {
                 onSelect={setActiveId}
                 onCreate={create}
                 onRename={rename}
+                onDelete={removeChat}
                 onSignOut={signOut}
             />
 
