@@ -15,6 +15,7 @@ export interface UserRepository {
     /** Throws if the email is taken — the unique index is the source of truth. */
     insert(email: string, passwordHash: string): Promise<User>
     findByEmail(email: string): Promise<(User & { passwordHash: string }) | null>
+    findById(id: string): Promise<User | null>
 }
 
 export interface SessionRepository {
@@ -67,6 +68,11 @@ export class PostgresUserRepository implements UserRepository {
         if (!row) return null
 
         return { ...toUser(row), passwordHash: row.password_hash }
+    }
+
+    async findById(id: string): Promise<User | null> {
+        const [row]: DBUser[] = await this.sql`SELECT * FROM users WHERE id = ${id}`
+        return row ? toUser(row) : null
     }
 }
 

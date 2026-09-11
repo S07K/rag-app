@@ -78,6 +78,14 @@ export const createAuthService = (
         return session?.userId ?? null
     },
 
+    async getUser(userId: string): Promise<User> {
+        const user = await userRepo.findById(userId)
+        // A live session whose user is gone means the session outlived its owner.
+        if (!user) throw new AppError(401, "Session expired or invalid")
+
+        return user
+    },
+
     async logout(token: string): Promise<void> {
         await sessionRepo.delete(hashToken(token))
     },

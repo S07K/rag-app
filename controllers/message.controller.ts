@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import { AppError } from "../errors/AppError"
-import type { MessageService } from "../services/message.service"
+import type { MessageService, StreamEvent } from "../services/message.service"
 import type { MessageBody } from "../schemas/message.schema"
 
 /**
@@ -14,7 +14,7 @@ const userIdOf = (req: { userId?: string }): string => {
 
 
 /** SSE frame: `event: <name>`, one line of data, blank line to terminate. */
-const frame = (event: string, data: unknown) =>
+const frame = (event: StreamEvent["type"], data: unknown) =>
     `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 export const createMessageController = (messageService: MessageService) => ({

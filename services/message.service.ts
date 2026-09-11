@@ -1,5 +1,5 @@
 import { AppError } from "../errors/AppError"
-import { buildPrompt } from "./prompt"
+import { buildPrompt, selectContext } from "./prompt"
 import type { ChatRepository } from "../repository/db/chat.repository"
 import type { Message, MessageRepository } from "../repository/db/message.repository"
 import type { DocumentRepository } from "../repository/db/document.repository"
@@ -23,6 +23,9 @@ export type StreamEvent =
     | { type: "sources"; value: Source[] }
     | { type: "token"; value: string }
     | { type: "done"; value: { messageId: string | null } }
+    // Emitted by the controller, not the service: once headers are sent the
+    // error middleware cannot respond, so failures travel as a stream frame.
+    | { type: "error"; value: { message: string } }
 
 const RETRIEVAL_LIMIT = 5
 const HISTORY_LIMIT = 20
@@ -74,7 +77,12 @@ export const createMessageService = (
         const [queryVector] = await embeddingClient.embed([content])
         if (!queryVector) throw new Error("Embedding client returned no vector")
 
-        const chunks = await vectorRepo.search(chatId, queryVector, RETRIEVAL_LIMIT)
+        const retrieved = await vectorRepo.search(chatId, queryVector, RETRIEVAL_LIMIT)
+
+        // Report what actually reached the prompt, not everything the search
+        // returned: chunks above the relevance cutoff are discarded, and the
+        // model's [1]/[2] citations are numbered from this filtered list.
+        const chunks = selectContext(retrieved)
 
         yield {
             type: "sources",

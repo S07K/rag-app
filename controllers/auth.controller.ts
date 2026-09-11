@@ -43,6 +43,8 @@ export const createAuthController = (authService: AuthService) => ({
     /** Used by the frontend on load to decide whether to show the login screen. */
     async me(req: Request, res: Response) {
         if (!req.userId) throw new AppError(401, "Not authenticated")
-        res.status(200).json({ id: req.userId })
+
+        const user = await authService.getUser(req.userId)
+        res.status(200).json({ id: user.id, email: user.email })
     },
 })

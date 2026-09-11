@@ -36,9 +36,8 @@ export const selectContext = (chunks: RetrievedChunk[]): RetrievedChunk[] => {
     return selected
 }
 
-export const buildPrompt = (chunks: RetrievedChunk[], history: Message[]): ChatMessage[] => {
-    const context = selectContext(chunks)
-
+/** Takes context already narrowed by selectContext, so numbering matches the UI. */
+export const buildPrompt = (context: RetrievedChunk[], history: Message[]): ChatMessage[] => {
     const system =
         context.length === 0
             ? SYSTEM_WITHOUT_CONTEXT

@@ -4,21 +4,31 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun --hot index.ts",
-    "start": "bun index.ts",
+    "dev": "bun run build:dev && bun scripts/dev.ts",
+    "dev:api": "bun --hot index.ts",
+    "start": "bun run build && bun index.ts",
+    "serve": "bun index.ts",
     "worker": "bun worker.ts",
-    "worker:dev": "bun --watch worker.ts"
+    "build": "rm -rf public && bun build ./frontend/index.html --outdir=public --minify --production",
+    "build:dev": "rm -rf public && bun build ./frontend/index.html --outdir=public"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "express": "^5.2.1",
+    "lucide-react": "^1.45.0",
     "multer": "^2.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/express": "^5.0.6",
-    "@types/multer": "^2.2.0"
+    "@types/multer": "^2.2.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
   },
   "peerDependencies": {
     "typescript": "^7"

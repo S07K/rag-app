@@ -24,6 +24,9 @@ Built with **Express 5 + TypeScript on Bun**, in a strict layered architecture.
 | Embeddings | `all-MiniLM-L6-v2` locally via Transformers.js (384-dim), OpenAI-ready |
 | LLM | Groq (`openai/gpt-oss-20b`), OpenAI-compatible API |
 | Uploads | multer, in-memory, `.txt` / `.md`, 256KB cap |
+| Frontend | React 19 + TypeScript, shadcn/ui design tokens, lucide icons |
+| Markdown | `react-markdown` + `remark-gfm` — tables, code blocks, inline formatting |
+| Bundler | `bun build` — no Vite, no config, no separate dev server |
 
 Database access is the one place Bun-specific API is used (`Bun.SQL`). It is confined
 to a single repository class behind an interface, so porting to `pg` on Node means
@@ -127,6 +130,40 @@ Because indexing is now asynchronous, a question asked while a document is still
 service detects that and emits a `warning` event ahead of the answer rather than
 blocking the request, since other documents may still answer it.
 
+### Frontend
+
+React 19, bundled by `bun build` — no Vite, no bundler config, no separate dev
+server. The API and the UI deploy as one artifact.
+
+The frontend imports its types **directly from the backend modules**:
+
+```ts
+import type { Chat } from "../repository/db/chat.repository"
+import type { StreamEvent } from "../services/message.service"
+```
+
+Type-only imports are erased at build time, so no server code reaches the bundle
+and the two sides cannot drift. This immediately caught a real bug: the controller
+emitted an `error` SSE frame that `StreamEvent` never declared.
+
+Chats can be renamed inline from the sidebar (pencil on hover; Enter or blur commits,
+Escape reverts) with an optimistic update that rolls back if the request fails.
+
+State lives in four hooks that mirror the backend's boundaries — `useAuth`,
+`useChats`, `useDocuments` (which polls while ingestion is in flight), and
+`useChat` (which drives the stream and holds the in-progress reply).
+
+Assistant output is rendered as markdown with `react-markdown`, which builds a React
+tree instead of injecting HTML — no `dangerouslySetInnerHTML`, no sanitiser to
+maintain, and it tolerates half-finished input, which matters because it re-renders
+on every streamed token. User messages stay plain text.
+
+Styling uses shadcn/ui's token system (`--background`, `--muted`, `--border`,
+`--radius` as HSL triples) so light and dark are one palette swap, with
+`lucide-react` for icons. Retrieved passages are shown as citation chips under each
+answer — and only the chunks that actually passed the relevance cutoff and reached
+the prompt, so the `[1]`/`[2]` markers in the text line up with the chips.
+
 ### Streaming
 
 Services are `async function*` generators that yield plain values:
@@ -211,8 +248,11 @@ passing its health check, and failing on the first real request.
 │       ├── local.embedding.client.ts    # MiniLM via Transformers.js
 │       └── llm.client.ts                # LLMClient interface + Groq impl
 ├── worker.ts                 # ingestion worker (separate process)
-├── public/
-│   └── index.html            # single-page frontend, no build step
+├── frontend/                 # React app — bundled into public/ by `bun run build`
+│   ├── api.ts                # fetch wrappers + the SSE reader
+│   ├── App.tsx
+│   ├── hooks/                # useAuth, useChats, useDocuments, useChat (streaming)
+│   └── components/
 └── scripts/
     └── smoke.sh              # end-to-end curl check of /chats
 ```
@@ -236,15 +276,23 @@ bun install
 cp .env.example .env          # then set DATABASE_URL and GROQ_API_KEY
 createdb rag_app
 psql -d rag_app -f repository/db/schema.sql    # re-runnable
-bun run dev
+bun run dev                   # builds the frontend, then starts the API
 ```
 
 A free Groq API key (no card) comes from [console.groq.com](https://console.groq.com).
 Embeddings run locally, so nothing else needs an account — the MiniLM model
 (~90MB) downloads on first upload and is cached after that.
 
-`bun run dev` starts the server with hot reload; `bun run start` runs it plainly.
-Then open <http://localhost:3000> — the frontend is served from `public/`.
+| Script | What it does |
+|---|---|
+| `bun run dev` | Build the frontend (unminified), start the API with hot reload |
+| `bun run start` | Production build, then start the API |
+| `bun run serve` | Start the API without rebuilding |
+| `bun run build` | Bundle `frontend/` into `public/` (minified, ~220KB) |
+| `bun run worker` | Start the ingestion worker |
+
+Then open <http://localhost:3000>. Express serves the bundle from `public/`, which
+is gitignored build output — one deployable artifact, no separate frontend host.
 
 Ingestion runs in a **separate process**, so start it too:
 
