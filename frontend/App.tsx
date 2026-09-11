@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { AuthGate } from "./components/AuthGate"
 import { Sidebar } from "./components/Sidebar"
 import { EmptyState } from "./components/EmptyState"
@@ -18,6 +18,8 @@ export function App() {
     const { documents, upload, remove, indexing, stalled } = useDocuments(activeId, handleError)
     const { messages, draft, streaming, loading: messagesLoading, send, stop } = useChat(activeId, handleError)
     const [input, setInput] = useState("")
+    // Held while a chat is being created for it — see handleSend.
+    const [pendingMessage, setPendingMessage] = useState<string | null>(null)
 
     // Attaching or sending with no chat open should just work.
     const ensureChat = useCallback(
@@ -35,9 +37,28 @@ export function App() {
         if (!text) return
 
         setInput("")
-        await ensureChat()
-        send(text)
-    }, [input, ensureChat, send])
+
+        if (activeId) {
+            send(text)
+            return
+        }
+
+        // No chat yet. `send` closes over chatId, so calling it straight after
+        // create() would use the stale null and drop the message silently —
+        // awaiting does not re-render the component. Park the text instead and
+        // let the effect below send it once React has the new chat.
+        await create()
+        setPendingMessage(text)
+    }, [input, activeId, create, send])
+
+    useEffect(() => {
+        // Wait for the message fetch too: it finishes by calling setMessages and
+        // would otherwise overwrite the optimistic user message.
+        if (!pendingMessage || !activeId || messagesLoading) return
+
+        send(pendingMessage)
+        setPendingMessage(null)
+    }, [pendingMessage, activeId, messagesLoading, send])
 
     if (!ready) return null
     if (!user) return <AuthGate notice={notice} onSubmit={authenticate} />

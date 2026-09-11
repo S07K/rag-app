@@ -23,6 +23,8 @@ export function useChat(chatId: string | null, onError: (err: unknown) => boolea
     const [loading, setLoading] = useState(false)
     const abort = useRef<AbortController | null>(null)
     const sourcesRef = useRef<Source[]>([])
+    /** Bumped on every local mutation, so a late fetch knows it is stale. */
+    const localWrites = useRef(0)
 
     useEffect(() => {
         // Leaving a chat mid-stream must not leave the request running.
@@ -36,11 +38,26 @@ export function useChat(chatId: string | null, onError: (err: unknown) => boolea
             return
         }
 
+        // Without this guard a response that arrives late overwrites newer
+        // state — it would wipe an optimistic message added in the meantime,
+        // or show the previous chat's history after a fast switch.
+        let cancelled = false
+        const writesAtStart = localWrites.current
+
         setLoading(true)
         api.listMessages(chatId)
-            .then(setMessages)
-            .catch((err) => { if (!onError(err)) throw err })
-            .finally(() => setLoading(false))
+            .then((list) => {
+                // Discard if anything was added locally while this was in flight —
+                // it would otherwise overwrite an optimistic message. Checking a
+                // loading flag cannot work here: setState from an effect does not
+                // apply until the next render, so the flag is always stale.
+                if (cancelled || localWrites.current !== writesAtStart) return
+                setMessages(list)
+            })
+            .catch((err) => { if (!cancelled && !onError(err)) throw err })
+            .finally(() => { if (!cancelled) setLoading(false) })
+
+        return () => { cancelled = true }
     }, [chatId, onError])
 
     const stop = useCallback(() => abort.current?.abort(), [])
@@ -53,6 +70,7 @@ export function useChat(chatId: string | null, onError: (err: unknown) => boolea
             abort.current = controller
 
             // Optimistic: the server persists this too, so a reload agrees.
+            localWrites.current += 1
             setMessages((prev) => [
                 ...prev,
                 { id: `local-${Date.now()}`, chatId, role: "user", content, createdAt: new Date() },
@@ -98,6 +116,7 @@ export function useChat(chatId: string | null, onError: (err: unknown) => boolea
                 if (answer.trim()) {
                     // Carry the sources across so citations survive the stream ending.
                     const sources = sourcesRef.current
+                    localWrites.current += 1
                     setMessages((prev) => [
                         ...prev,
                         { id: `local-a-${Date.now()}`, chatId, role: "assistant", content: answer, createdAt: new Date(), sources },

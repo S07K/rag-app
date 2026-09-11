@@ -14,11 +14,22 @@ export function useDocuments(chatId: string | null, onError: (err: unknown) => b
     const [documents, setDocuments] = useState<Document[]>([])
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+    // Bumped whenever the chat changes; responses tagged with an older value are
+    // discarded so a slow request cannot overwrite a newer one.
+    const generation = useRef(0)
+
+    useEffect(() => {
+        generation.current += 1
+    }, [chatId])
+
     const refresh = useCallback(async () => {
         if (!chatId) return setDocuments([])
 
+        const mine = generation.current
+
         try {
-            setDocuments(await api.listDocuments(chatId))
+            const list = await api.listDocuments(chatId)
+            if (generation.current === mine) setDocuments(list)
         } catch (err) {
             if (!onError(err)) throw err
         }
