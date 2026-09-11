@@ -12,12 +12,14 @@ export const createDocumentController = (documentService: DocumentService) => ({
 
     // Translate the HTTP shape into the domain shape, so the service never
     // depends on multer.
-    const doc = await documentService.upload(chatId, {
+    const doc = await documentService.acceptUpload(chatId, {
       filename: file.originalname,
       buffer: file.buffer,
     });
 
-    res.status(201).json({ id: doc.id, filename: doc.filename, status: doc.status });
+    // 202, not 201: accepted for processing, not finished. The client polls
+    // GET /chats/:chatId/uploads and watches `status` reach "ready".
+    res.status(202).json({ id: doc.id, filename: doc.filename, status: doc.status });
   },
   async list(req: Request<{ chatId: string }>, res: Response) {
     const { chatId } = req.params;

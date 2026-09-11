@@ -90,12 +90,49 @@ ready/failed`) already exists — moving ingestion to a worker needs no migratio
 Every chunk records the model that embedded it. Vectors from different models are
 not comparable, so a homogeneous index is a correctness requirement, not a detail.
 
+### Background ingestion
+
+Embedding is CPU-bound and slow, so uploads return **`202 Accepted`** in ~20ms and a
+worker does the work:
+
+```
+POST /chats/:chatId/uploads  →  store text, status 'pending'  →  202   (~20ms)
+worker                       →  'processing' → chunk → embed → 'ready'
+client                       →  polls GET /uploads until status settles
+```
+
+The queue is the `documents` table itself — no Redis, no broker:
+
+```sql
+UPDATE documents SET status = 'processing', attempts = attempts + 1, claimed_at = now()
+WHERE id = (
+    SELECT id FROM documents WHERE status = 'pending'
+    ORDER BY created_at
+    FOR UPDATE SKIP LOCKED       -- workers step over each other's rows
+    LIMIT 1
+)
+RETURNING *;
+```
+
+`SKIP LOCKED` is what makes it safe to run many workers: each locks the row it takes
+and the others skip past rather than blocking. Verified with 6 documents and 3
+concurrent workers — each document claimed exactly once, no duplicate chunks.
+
+Failures retry up to 3 times, then land in `failed` with `last_error` recorded. A
+worker killed mid-job leaves a row in `processing`; the next worker to start
+requeues anything claimed more than 5 minutes ago.
+
+Because indexing is now asynchronous, a question asked while a document is still
+`pending` would be answered from an incomplete corpus — silently. The message
+service detects that and emits a `warning` event ahead of the answer rather than
+blocking the request, since other documents may still answer it.
+
 ### Streaming
 
 Services are `async function*` generators that yield plain values:
 
 ```ts
-{ type: "status" | "sources" | "token" | "done", value: ... }
+{ type: "status" | "warning" | "sources" | "token" | "done", value: ... }
 ```
 
 The controller is the only code that calls `res.write()`. That boundary means the
@@ -173,6 +210,7 @@ passing its health check, and failing on the first real request.
 │       ├── embedding.client.ts          # EmbeddingClient interface
 │       ├── local.embedding.client.ts    # MiniLM via Transformers.js
 │       └── llm.client.ts                # LLMClient interface + Groq impl
+├── worker.ts                 # ingestion worker (separate process)
 ├── public/
 │   └── index.html            # single-page frontend, no build step
 └── scripts/
@@ -207,6 +245,15 @@ Embeddings run locally, so nothing else needs an account — the MiniLM model
 
 `bun run dev` starts the server with hot reload; `bun run start` runs it plainly.
 Then open <http://localhost:3000> — the frontend is served from `public/`.
+
+Ingestion runs in a **separate process**, so start it too:
+
+```bash
+bun run worker
+```
+
+Without it, uploads are accepted (`202`) and sit at `pending` — the API stays
+fully responsive either way.
 
 Verify the API end to end with the server running:
 
@@ -247,7 +294,7 @@ set, so `EMBEDDING_PROVIDER=locl` fails at startup rather than at first use.
 | `GET` | `/chats/:chatId` | Get one chat — `404` if absent |
 | `PATCH` | `/chats/:chatId` | Rename a chat |
 | `DELETE` | `/chats/:chatId` | Delete a chat — `204` |
-| `POST` | `/chats/:chatId/uploads` | Upload a `.txt`/`.md` document; chunks, embeds, stores |
+| `POST` | `/chats/:chatId/uploads` | Upload a `.txt`/`.md` document — `202`, queued for indexing |
 | `GET` | `/chats/:chatId/uploads` | List a chat's documents and their status |
 | `GET` | `/chats/:chatId/uploads/:documentId` | One document |
 | `DELETE` | `/chats/:chatId/uploads/:documentId` | Delete a document and its chunks |
@@ -302,7 +349,7 @@ data: {"messageId":"0a9e0513-6e3d-4bf3-8088-44b2848a940d"}
 - [x] Streaming chat over SSE, with abort handling on client disconnect
 - [x] Minimal web frontend (vanilla, no build step)
 - [ ] Authentication
-- [ ] Background ingestion (the `status` column is already shaped for it)
+- [x] Background ingestion — Postgres-backed job queue with retries
 - [ ] Recursive chunk splitting on paragraph/sentence boundaries
 
 ### Known limitations
@@ -310,6 +357,5 @@ data: {"messageId":"0a9e0513-6e3d-4bf3-8088-44b2848a940d"}
 - **Chunking splits on character count**, so chunks can begin mid-sentence and
   straddle topic boundaries. Recursive splitting on paragraph then sentence
   boundaries is the standard fix.
-- **Ingestion is synchronous**, so a 256KB upload blocks its request for ~6s.
 - **The relevance cutoff (cosine distance `0.8`) is calibrated on sample data**, not
   tuned against a real corpus.

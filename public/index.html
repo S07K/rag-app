@@ -82,6 +82,11 @@
     border: 1px solid var(--border); color: var(--muted); font-variant-numeric: tabular-nums;
   }
   .err { color: var(--err); }
+  .warning {
+    max-width: 720px; margin: 0 auto 14px; padding: 8px 12px; border-radius: 8px;
+    font-size: 13px; color: var(--warn); border: 1px solid var(--warn);
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+  }
   .empty { color: var(--muted); text-align: center; margin-top: 60px; font-size: 14px; }
   .cursor::after {
     content: "▌"; animation: blink 1s steps(2) infinite; color: var(--muted);
@@ -182,15 +187,29 @@ async function selectChat(id) {
 }
 
 /* ---------------- documents ---------------- */
+let docPoll = null
+
 async function loadDocs() {
   if (!chatId) return
   const docs = await api(`/chats/${chatId}/uploads`)
+
   $("docs").innerHTML = ""
   for (const d of docs) {
     const el = document.createElement("span")
     el.className = "doc " + d.status
     el.textContent = d.filename
+    el.title = d.lastError || d.status
     $("docs").append(el)
+  }
+
+  // Ingestion is asynchronous, so keep polling until everything settles.
+  const indexing = docs.some((d) => d.status === "pending" || d.status === "processing")
+  clearTimeout(docPoll)
+  if (indexing) {
+    setStatus(`indexing ${docs.filter(d => d.status !== "ready" && d.status !== "failed").length} document(s)…`)
+    docPoll = setTimeout(loadDocs, 1500)
+  } else if (docs.length) {
+    setStatus("ready")
   }
 }
 
@@ -205,7 +224,7 @@ $("file").onchange = async (e) => {
 
   try {
     await api(`/chats/${chatId}/uploads`, { method: "POST", body: form })
-    setStatus("indexed " + file.name)
+    setStatus("queued " + file.name)
   } catch (err) {
     setStatus("upload failed: " + err.message)
   }
@@ -300,6 +319,13 @@ async function send(content) {
 
     for await (const { event, data } of readEvents(res)) {
       if (event === "status") setStatus(data)
+
+      if (event === "warning") {
+        const box = document.createElement("div")
+        box.className = "warning"
+        box.textContent = `⏳ ${data.message} (${data.documents.join(", ")})`
+        bubble.parentElement.before(box)
+      }
 
       if (event === "sources") {
         if (data.length) {

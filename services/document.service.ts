@@ -1,7 +1,7 @@
 import { AppError } from "../errors/AppError"
 import { chunkText } from "./chunking"
 import type { ChatRepository } from "../repository/db/chat.repository"
-import type { Document, DocumentRepository } from "../repository/db/document.repository"
+import type { Document, DocumentJob, DocumentRepository } from "../repository/db/document.repository"
 import type { EmbeddingClient } from "../repository/clients/embedding.client"
 
 export type UploadInput = {
@@ -15,55 +15,54 @@ export const createDocumentService = (
     embeddingClient: EmbeddingClient,
 ) => ({
     /**
-     * Ingests a text file: chunk -> embed -> store.
-     *
-     * Runs synchronously inside the request for now. Embedding is the bottleneck
-     * (~18ms per chunk), which is why uploads are size-capped; the status column
-     * is already shaped for moving this to a background worker.
+     * Fast path, runs inside the request: validate, persist the text, return.
+     * The expensive work (embedding) happens later in a worker, so the client
+     * gets a response in milliseconds rather than seconds.
      */
-    async upload(chatId: string, file: UploadInput): Promise<Document> {
-        // Explicit check so a bad chat is a clean 404 rather than an FK violation
-        // surfacing as a 500.
+    async acceptUpload(chatId: string, file: UploadInput): Promise<Document> {
         const chat = await chatRepo.findById(chatId)
         if (!chat) throw new AppError(404, "Chat not found")
 
         const text = file.buffer.toString("utf-8")
-        const chunks = chunkText(text)
 
         // Validate before creating the row, so an invalid request leaves no trace.
+        if (chunkText(text).length === 0) {
+            throw new AppError(400, "File has no readable text")
+        }
+
+        // Stored as 'pending'; the worker picks it up from here.
+        return documentRepo.insert(chatId, file.filename, text)
+    },
+
+    /**
+     * Slow path, runs in the worker. Takes an already-claimed job (status is
+     * already 'processing'), so it never races with another worker.
+     */
+    async processDocument(job: DocumentJob): Promise<number> {
+        const chunks = chunkText(job.content)
+
         if (chunks.length === 0) {
             throw new AppError(400, "File has no readable text")
         }
 
-        const document = await documentRepo.insert(chatId, file.filename)
+        const vectors = await embeddingClient.embed(chunks)
 
-        try {
-            await documentRepo.updateStatus(document.id, "processing")
-
-            const vectors = await embeddingClient.embed(chunks)
-
-            if (vectors.length !== chunks.length) {
-                throw new Error(
-                    `Embedding count mismatch: ${chunks.length} chunks produced ${vectors.length} vectors`,
-                )
-            }
-
-            await documentRepo.insertChunks(
-                document.id,
-                chatId,
-                chunks.map((content, i) => ({ content, embedding: vectors[i]! })),
-                embeddingClient.model,
+        if (vectors.length !== chunks.length) {
+            throw new Error(
+                `Embedding count mismatch: ${chunks.length} chunks produced ${vectors.length} vectors`,
             )
-
-            await documentRepo.updateStatus(document.id, "ready")
-        } catch (err) {
-            // Must not throw: if the database is what failed, this would replace
-            // the real error with a less useful one.
-            await documentRepo.updateStatus(document.id, "failed").catch(() => {})
-            throw err
         }
 
-        return { ...document, status: "ready" }
+        await documentRepo.insertChunks(
+            job.id,
+            job.chatId,
+            chunks.map((content, i) => ({ content, embedding: vectors[i]! })),
+            embeddingClient.model,
+        )
+
+        await documentRepo.updateStatus(job.id, "ready")
+
+        return chunks.length
     },
 
     async listDocuments(chatId: string): Promise<Document[]> {
@@ -76,8 +75,8 @@ export const createDocumentService = (
     async getDocument(chatId: string, documentId: string): Promise<Document> {
         const document = await documentRepo.findById(documentId)
 
-        // Check ownership, not just existence: a document id from another chat
-        // must not be readable through this chat's URL.
+        // Ownership, not just existence: a document id from another chat must
+        // not be readable through this chat's URL.
         if (!document || document.chatId !== chatId) {
             throw new AppError(404, "Document not found")
         }
@@ -86,7 +85,6 @@ export const createDocumentService = (
     },
 
     async deleteDocument(chatId: string, documentId: string): Promise<void> {
-        // Reuse the ownership check above rather than duplicating it.
         await this.getDocument(chatId, documentId)
 
         const deleted = await documentRepo.delete(documentId)

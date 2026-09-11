@@ -16,6 +16,18 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 -- Idempotent: ADD CONSTRAINT has no IF NOT EXISTS, so drop first.
+-- Ingestion is asynchronous, so the extracted text must outlive the request.
+-- Also lets us re-embed without asking the user to re-upload.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS content    text NOT NULL DEFAULT '';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS attempts   int  NOT NULL DEFAULT 0;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_error text;
+-- When a worker claims a job; used to requeue jobs whose worker died.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+
+-- The worker scans for pending work; index the columns it filters on.
+CREATE INDEX IF NOT EXISTS documents_status_created_at_idx
+    ON documents (status, created_at);
+
 ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_status_check;
 ALTER TABLE documents ADD  CONSTRAINT documents_status_check
     CHECK (status IN ('pending','processing','ready','failed'));

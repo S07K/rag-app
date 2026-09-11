@@ -27,7 +27,8 @@ const llmClient = new GroqLLMClient(Config.LLM_MODEL, Config.GROQ_API_KEY!)
 const chatService = createChatService(chatRepository)
 const documentService = createDocumentService(chatRepository, documentRepository, embeddingClient)
 const messageService = createMessageService(
-    chatRepository, messageRepository, vectorRepository, embeddingClient, llmClient,
+    chatRepository, messageRepository, documentRepository, vectorRepository,
+    embeddingClient, llmClient,
 )
 
 const app = express()

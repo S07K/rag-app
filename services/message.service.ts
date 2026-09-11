@@ -2,6 +2,7 @@ import { AppError } from "../errors/AppError"
 import { buildPrompt } from "./prompt"
 import type { ChatRepository } from "../repository/db/chat.repository"
 import type { Message, MessageRepository } from "../repository/db/message.repository"
+import type { DocumentRepository } from "../repository/db/document.repository"
 import type { VectorRepository } from "../repository/vector/chunk.vector.repository"
 import type { EmbeddingClient } from "../repository/clients/embedding.client"
 import type { LLMClient } from "../repository/clients/llm.client"
@@ -18,6 +19,7 @@ export type Source = {
  */
 export type StreamEvent =
     | { type: "status"; value: string }
+    | { type: "warning"; value: { message: string; documents: string[] } }
     | { type: "sources"; value: Source[] }
     | { type: "token"; value: string }
     | { type: "done"; value: { messageId: string | null } }
@@ -28,6 +30,7 @@ const HISTORY_LIMIT = 20
 export const createMessageService = (
     chatRepo: ChatRepository,
     messageRepo: MessageRepository,
+    documentRepo: DocumentRepository,
     vectorRepo: VectorRepository,
     embeddingClient: EmbeddingClient,
     llmClient: LLMClient,
@@ -43,6 +46,25 @@ export const createMessageService = (
         // Persist BEFORE the slow work: if anything below fails or the client
         // disappears, the user's message is still in the history.
         await messageRepo.insert(chatId, "user", content)
+
+        // Ingestion is asynchronous, so a document the user just uploaded may
+        // not be searchable yet. Retrieval would silently answer from an
+        // incomplete corpus, so say so rather than letting it look complete.
+        // Warn and continue — other documents may well answer the question.
+        const documents = await documentRepo.findByChat(chatId)
+        const indexing = documents.filter(
+            (d) => d.status === "pending" || d.status === "processing",
+        )
+
+        if (indexing.length > 0) {
+            yield {
+                type: "warning",
+                value: {
+                    message: `${indexing.length} document(s) still indexing — this answer may be incomplete.`,
+                    documents: indexing.map((d) => d.filename),
+                },
+            }
+        }
 
         // Status events go out before each slow await, so the client is never
         // left watching nothing happen.
