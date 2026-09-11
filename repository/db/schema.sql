@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Idempotent: ADD CONSTRAINT has no IF NOT EXISTS, so drop first.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_status_check;
+ALTER TABLE documents ADD  CONSTRAINT documents_status_check
+    CHECK (status IN ('pending','processing','ready','failed'));
+
 CREATE TABLE IF NOT EXISTS chunks (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

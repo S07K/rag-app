@@ -8,11 +8,17 @@ import { createChatRouter } from './routes/chat.routes'
 import { createChatService } from './services/chat.service'
 import { SQL } from 'bun'
 import { PostgresChatRepository } from './repository/db/chat.postgres.repository'
+import { createDocumentService } from './services/document.service'
+import { PostgresDocumentRepository } from './repository/db/document.repository'
+import { LocalEmbeddingClient } from './repository/clients/local.embedding.client'
 
 const sql = new SQL(Config.DATABASE_URL)
 const chatRepository = new PostgresChatRepository(sql)
+const documentRepository = new PostgresDocumentRepository(sql)
+const embeddingClient = new LocalEmbeddingClient()
 
 const chatService = createChatService(chatRepository)
+const documentService = createDocumentService(chatRepository, documentRepository, embeddingClient)
 
 const app = express()
 const PORT = Config.PORT
@@ -22,7 +28,7 @@ app.use(express.json())
 app.use(HomeRouter)
 app.use(healthRouter)
 
-app.use(createChatRouter(chatService))
+app.use("/chats", createChatRouter(chatService, documentService))
 
 app.use(notFoundHandler)
 app.use(errorHandler)
