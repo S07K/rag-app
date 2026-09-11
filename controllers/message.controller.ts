@@ -3,6 +3,16 @@ import { AppError } from "../errors/AppError"
 import type { MessageService } from "../services/message.service"
 import type { MessageBody } from "../schemas/message.schema"
 
+/**
+ * requireAuth guarantees this. Typed optional because it is absent on public
+ * routes, so reaching here without it means the route is misconfigured.
+ */
+const userIdOf = (req: { userId?: string }): string => {
+    if (!req.userId) throw new Error("requireAuth must run before this handler")
+    return req.userId
+}
+
+
 /** SSE frame: `event: <name>`, one line of data, blank line to terminate. */
 const frame = (event: string, data: unknown) =>
     `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -30,7 +40,7 @@ export const createMessageController = (messageService: MessageService) => ({
         res.on("close", () => controller.abort())
 
         try {
-            for await (const event of messageService.sendMessage(chatId, content, controller.signal)) {
+            for await (const event of messageService.sendMessage(userIdOf(req), chatId, content, controller.signal)) {
                 res.write(frame(event.type, event.value))
             }
         } catch (err) {
@@ -54,7 +64,7 @@ export const createMessageController = (messageService: MessageService) => ({
     },
 
     async list(req: Request<{ chatId: string }>, res: Response) {
-        const messages = await messageService.listMessages(req.params.chatId)
+        const messages = await messageService.listMessages(userIdOf(req), req.params.chatId)
         res.status(200).json(messages)
     },
 })

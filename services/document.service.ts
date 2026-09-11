@@ -19,8 +19,8 @@ export const createDocumentService = (
      * The expensive work (embedding) happens later in a worker, so the client
      * gets a response in milliseconds rather than seconds.
      */
-    async acceptUpload(chatId: string, file: UploadInput): Promise<Document> {
-        const chat = await chatRepo.findById(chatId)
+    async acceptUpload(userId: string, chatId: string, file: UploadInput): Promise<Document> {
+        const chat = await chatRepo.findById(chatId, userId)
         if (!chat) throw new AppError(404, "Chat not found")
 
         const text = file.buffer.toString("utf-8")
@@ -65,14 +65,17 @@ export const createDocumentService = (
         return chunks.length
     },
 
-    async listDocuments(chatId: string): Promise<Document[]> {
-        const chat = await chatRepo.findById(chatId)
+    async listDocuments(userId: string, chatId: string): Promise<Document[]> {
+        const chat = await chatRepo.findById(chatId, userId)
         if (!chat) throw new AppError(404, "Chat not found")
 
         return documentRepo.findByChat(chatId)
     },
 
-    async getDocument(chatId: string, documentId: string): Promise<Document> {
+    async getDocument(userId: string, chatId: string, documentId: string): Promise<Document> {
+        // Scope the chat first; the document check then rides on a chat we own.
+        await this.listDocuments(userId, chatId)
+
         const document = await documentRepo.findById(documentId)
 
         // Ownership, not just existence: a document id from another chat must
@@ -84,8 +87,8 @@ export const createDocumentService = (
         return document
     },
 
-    async deleteDocument(chatId: string, documentId: string): Promise<void> {
-        await this.getDocument(chatId, documentId)
+    async deleteDocument(userId: string, chatId: string, documentId: string): Promise<void> {
+        await this.getDocument(userId, chatId, documentId)
 
         const deleted = await documentRepo.delete(documentId)
         if (!deleted) throw new AppError(404, "Document not found")

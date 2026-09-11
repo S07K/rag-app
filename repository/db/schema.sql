@@ -1,9 +1,34 @@
+CREATE TABLE IF NOT EXISTS users (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         text NOT NULL,
+    password_hash text NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- Case-insensitive uniqueness: Alice@x.com and alice@x.com are one account.
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email));
+
+CREATE TABLE IF NOT EXISTS sessions (
+    -- The token itself is the primary key; we store a SHA-256 of it, never the
+    -- raw value, so a leaked database cannot be used to impersonate anyone.
+    token_hash text PRIMARY KEY,
+    user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions (expires_at);
+
 CREATE TABLE IF NOT EXISTS chats (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title      text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS chats_user_id_created_at_idx ON chats (user_id, created_at DESC);
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -61,3 +86,22 @@ ALTER TABLE messages ADD  CONSTRAINT messages_role_check
 -- Composite: every read is "this chat's messages, oldest first".
 CREATE INDEX IF NOT EXISTS messages_chat_id_created_at_idx
     ON messages (chat_id, created_at);
+
+
+-- Foreign keys stated separately so they survive a table being recreated.
+-- ADD CONSTRAINT has no IF NOT EXISTS, so drop first.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_chat_id_fkey;
+ALTER TABLE documents ADD  CONSTRAINT documents_chat_id_fkey
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+
+ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chunks_chat_id_fkey;
+ALTER TABLE chunks ADD  CONSTRAINT chunks_chat_id_fkey
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+
+ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chunks_document_id_fkey;
+ALTER TABLE chunks ADD  CONSTRAINT chunks_document_id_fkey
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE;
+
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_chat_id_fkey;
+ALTER TABLE messages ADD  CONSTRAINT messages_chat_id_fkey
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;

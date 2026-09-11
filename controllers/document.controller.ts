@@ -1,6 +1,16 @@
 import type { Request, Response } from "express";
 import type { DocumentService } from "../services/document.service";
 
+/**
+ * requireAuth guarantees this. Typed optional because it is absent on public
+ * routes, so reaching here without it means the route is misconfigured.
+ */
+const userIdOf = (req: { userId?: string }): string => {
+    if (!req.userId) throw new Error("requireAuth must run before this handler")
+    return req.userId
+}
+
+
 export const createDocumentController = (documentService: DocumentService) => ({
   async upload(req: Request<{ chatId: string }>, res: Response) {
     const file = req.file;
@@ -12,7 +22,7 @@ export const createDocumentController = (documentService: DocumentService) => ({
 
     // Translate the HTTP shape into the domain shape, so the service never
     // depends on multer.
-    const doc = await documentService.acceptUpload(chatId, {
+    const doc = await documentService.acceptUpload(userIdOf(req), chatId, {
       filename: file.originalname,
       buffer: file.buffer,
     });
@@ -23,7 +33,7 @@ export const createDocumentController = (documentService: DocumentService) => ({
   },
   async list(req: Request<{ chatId: string }>, res: Response) {
     const { chatId } = req.params;
-    const documents = await documentService.listDocuments(chatId);
+    const documents = await documentService.listDocuments(userIdOf(req), chatId);
     res.status(200).json(documents);
   },
   async get(
@@ -31,7 +41,7 @@ export const createDocumentController = (documentService: DocumentService) => ({
     res: Response,
   ) {
     const { chatId, documentId } = req.params;
-    const document = await documentService.getDocument(chatId, documentId);
+    const document = await documentService.getDocument(userIdOf(req), chatId, documentId);
     res.status(200).json(document);
   },
   async remove(
@@ -39,7 +49,7 @@ export const createDocumentController = (documentService: DocumentService) => ({
     res: Response,
   ) {
     const { chatId, documentId } = req.params;
-    await documentService.deleteDocument(chatId, documentId);
+    await documentService.deleteDocument(userIdOf(req), chatId, documentId);
     res.status(204).send();
   },
 });

@@ -36,11 +36,12 @@ export const createMessageService = (
     llmClient: LLMClient,
 ) => ({
     async *sendMessage(
+        userId: string,
         chatId: string,
         content: string,
         signal?: AbortSignal,
     ): AsyncGenerator<StreamEvent> {
-        const chat = await chatRepo.findById(chatId)
+        const chat = await chatRepo.findById(chatId, userId)
         if (!chat) throw new AppError(404, "Chat not found")
 
         // Persist BEFORE the slow work: if anything below fails or the client
@@ -110,8 +111,8 @@ export const createMessageService = (
         yield { type: "done", value: { messageId: saved?.id ?? null } }
     },
 
-    async listMessages(chatId: string): Promise<Message[]> {
-        const chat = await chatRepo.findById(chatId)
+    async listMessages(userId: string, chatId: string): Promise<Message[]> {
+        const chat = await chatRepo.findById(chatId, userId)
         if (!chat) throw new AppError(404, "Chat not found")
 
         return messageRepo.findByChat(chatId)
