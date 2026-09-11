@@ -1,0 +1,56 @@
+# Keeps the Render free instance from spinning down.
+#
+# Render sleeps a free service after 15 minutes with no traffic, and waking it
+# takes ~50s. This pings /health often enough to stay ahead of that.
+#
+# /health touches no database, so the Postgres instance still scales to zero.
+#
+# Caveats worth knowing:
+#   * GitHub's scheduled runs are best-effort and can be delayed under load, so
+#     an occasional cold start still happens. It is a reduction, not a guarantee.
+#   * Scheduled workflows are disabled automatically after 60 days with no
+#     commits to the repository. Re-enable from the Actions tab.
+#   * Free Actions minutes are unlimited on public repositories. On a private
+#     one this burns ~4,300 minutes/month against a 2,000 minute allowance —
+#     use an external pinger (e.g. cron-job.org) instead.
+
+name: Keep warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+# A long cold start can overlap the next scheduled run; don't stack them.
+concurrency:
+  group: keep-warm
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping /health
+        env:
+          # Override by setting an APP_URL repository variable.
+          APP_URL: ${{ vars.APP_URL || 'https://rag-chat-qqme.onrender.com' }}
+        run: |
+          set -euo pipefail
+
+          # --max-time 180 so a genuine cold start is waited out rather than
+          # reported as an outage. --retry covers transient network blips.
+          # Deliberately not named `status` — that is read-only in some shells.
+          code=$(curl -sS -o /tmp/body -w '%{http_code}' \
+            --max-time 180 --retry 2 --retry-delay 10 --retry-connrefused \
+            "$APP_URL/health")
+
+          echo "status=$code body=$(cat /tmp/body)"
+
+          if [ "$code" != "200" ]; then
+            echo "::error::$APP_URL/health returned $code"
+            exit 1
+          fi
