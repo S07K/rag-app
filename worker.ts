@@ -4,13 +4,40 @@ import { PostgresDocumentRepository } from "./repository/db/document.repository"
 import { createEmbeddingClient } from "./repository/clients/embedding.factory"
 import { createDocumentService } from "./services/document.service"
 
-/** How long to sleep when the queue is empty. */
-const IDLE_POLL_MS = 2000
+/**
+ * Safety net only — the queue is normally drained on demand via wake().
+ *
+ * Polling keeps the database awake, and a serverless Postgres that never idles
+ * bills as if it were always on. Long by default so it can scale to zero
+ * between uploads; override with WORKER_POLL_MS when the worker runs as its own
+ * process and has no in-process wake() to rely on.
+ */
+const IDLE_POLL_MS = Number(process.env.WORKER_POLL_MS ?? 3_600_000)
 /** A job claimed longer ago than this is assumed abandoned by a dead worker. */
 const STALE_AFTER_SECONDS = 300
 const MAX_ATTEMPTS = 3
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** A sleep that can be cut short, so a new upload is picked up immediately. */
+function interruptibleSleep() {
+    let interrupt: (() => void) | null = null
+
+    return {
+        wake: () => interrupt?.(),
+        sleep: (ms: number) =>
+            new Promise<void>((resolve) => {
+                const timer = setTimeout(() => {
+                    interrupt = null
+                    resolve()
+                }, ms)
+
+                interrupt = () => {
+                    clearTimeout(timer)
+                    interrupt = null
+                    resolve()
+                }
+            }),
+    }
+}
 
 /**
  * Drains the ingestion queue until stopped.
@@ -20,6 +47,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 export function startWorker(sql: SQL) {
     const documentRepo = new PostgresDocumentRepository(sql)
+    const idle = interruptibleSleep()
 
     let running = true
 
@@ -40,7 +68,7 @@ export function startWorker(sql: SQL) {
             const job = await documentRepo.claimNextPending()
 
             if (!job) {
-                await sleep(IDLE_POLL_MS)
+                await idle.sleep(IDLE_POLL_MS)
                 continue
             }
 
@@ -68,6 +96,11 @@ export function startWorker(sql: SQL) {
 
     const finished = loop()
 
-    /** Stops after the current job, so nothing is abandoned half-embedded. */
-    return { stop: () => { running = false }, finished }
+    return {
+        /** Stops after the current job, so nothing is abandoned half-embedded. */
+        stop: () => { running = false; idle.wake() },
+        /** Call when work is enqueued: drains immediately instead of waiting. */
+        wake: () => idle.wake(),
+        finished,
+    }
 }

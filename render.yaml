@@ -18,6 +18,14 @@ services:
       # `bun worker.entry.ts` against the same DATABASE_URL.
       - key: RUN_WORKER_INLINE
         value: "true"
+      # Ingestion is triggered in-process on upload (wake()), so idle polling is
+      # only a safety net for jobs left behind by a crash.
+      #
+      # Neon bills ~5 minutes of compute per wake-up regardless of query length,
+      # so the interval sets the floor on monthly usage: every 10 min would be
+      # ~365 compute-hours against a 100-hour quota; hourly is ~61.
+      - key: WORKER_POLL_MS
+        value: "3600000"
       - key: NODE_ENV
         value: production
       # Set these in the Render dashboard — never in this file.

@@ -33,7 +33,13 @@ const llmClient = new GroqLLMClient(Config.LLM_MODEL, Config.GROQ_API_KEY!)
 
 const authService = createAuthService(userRepository, sessionRepository)
 const chatService = createChatService(chatRepository)
-const documentService = createDocumentService(chatRepository, documentRepository, embeddingClient)
+// Started before the services so its wake() can be injected into the one that
+// enqueues work.
+const inlineWorker = process.env.RUN_WORKER_INLINE === "true" ? startWorker(sql) : null
+
+const documentService = createDocumentService(
+    chatRepository, documentRepository, embeddingClient, inlineWorker?.wake,
+)
 const messageService = createMessageService(
     chatRepository, messageRepository, documentRepository, vectorRepository,
     embeddingClient, llmClient,
@@ -63,10 +69,6 @@ app.use(errorHandler)
 
 await assertEmbeddingDimensions(sql, embeddingClient)
 
-// Hosts that only offer a single service can run ingestion in this process.
-// With an API-backed embedding client the work is I/O-bound, so it does not
-// block request handling the way the local model would.
-if (process.env.RUN_WORKER_INLINE === "true") startWorker(sql)
 
 app.listen(PORT, () => {
     console.log("Server is listening on port", PORT)

@@ -13,6 +13,12 @@ export const createDocumentService = (
     chatRepo: ChatRepository,
     documentRepo: DocumentRepository,
     embeddingClient: EmbeddingClient,
+    /**
+     * Called after a document is queued. Set when the worker runs in this
+     * process, so ingestion starts at once rather than on the next poll.
+     * Absent when the worker is a separate process — polling covers that.
+     */
+    onQueued?: () => void,
 ) => ({
     /**
      * Fast path, runs inside the request: validate, persist the text, return.
@@ -31,7 +37,11 @@ export const createDocumentService = (
         }
 
         // Stored as 'pending'; the worker picks it up from here.
-        return documentRepo.insert(chatId, file.filename, text)
+        const document = await documentRepo.insert(chatId, file.filename, text)
+
+        onQueued?.()
+
+        return document
     },
 
     /**
