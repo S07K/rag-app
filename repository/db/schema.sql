@@ -33,3 +33,19 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS chunks_chat_id_idx ON chunks (chat_id);
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx
     ON chunks USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_id    uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    role       text NOT NULL CHECK (role IN ('user','assistant')),
+    content    text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_role_check;
+ALTER TABLE messages ADD  CONSTRAINT messages_role_check
+    CHECK (role IN ('user', 'assistant'));
+
+-- Composite: every read is "this chat's messages, oldest first".
+CREATE INDEX IF NOT EXISTS messages_chat_id_created_at_idx
+    ON messages (chat_id, created_at);
