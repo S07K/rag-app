@@ -35,6 +35,10 @@ const PORT = Config.PORT
 
 
 app.use(express.json())
+
+// Static frontend. Before the routers so "/" serves the app, not JSON.
+app.use(express.static("public"))
+
 app.use(HomeRouter)
 app.use(healthRouter)
 

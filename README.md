@@ -173,6 +173,8 @@ passing its health check, and failing on the first real request.
 │       ├── embedding.client.ts          # EmbeddingClient interface
 │       ├── local.embedding.client.ts    # MiniLM via Transformers.js
 │       └── llm.client.ts                # LLMClient interface + Groq impl
+├── public/
+│   └── index.html            # single-page frontend, no build step
 └── scripts/
     └── smoke.sh              # end-to-end curl check of /chats
 ```
@@ -204,6 +206,7 @@ Embeddings run locally, so nothing else needs an account — the MiniLM model
 (~90MB) downloads on first upload and is cached after that.
 
 `bun run dev` starts the server with hot reload; `bun run start` runs it plainly.
+Then open <http://localhost:3000> — the frontend is served from `public/`.
 
 Verify the API end to end with the server running:
 
@@ -256,7 +259,6 @@ set, so `EMBEDDING_PROVIDER=locl` fails at startup rather than at first use.
 | Method | Path | Description |
 |---|---|---|
 | — | — | Authentication (not designed yet) |
-| — | — | A minimal web frontend |
 
 ### Example: asking a question
 
@@ -298,7 +300,7 @@ data: {"messageId":"0a9e0513-6e3d-4bf3-8088-44b2848a940d"}
 - [x] Document upload, chunking, embedding
 - [x] Vector retrieval with pgvector + HNSW
 - [x] Streaming chat over SSE, with abort handling on client disconnect
-- [ ] A minimal web frontend
+- [x] Minimal web frontend (vanilla, no build step)
 - [ ] Authentication
 - [ ] Background ingestion (the `status` column is already shaped for it)
 - [ ] Recursive chunk splitting on paragraph/sentence boundaries
